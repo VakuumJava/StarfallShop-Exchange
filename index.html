@@ -527,20 +527,15 @@
     <script>
         // Configuration for different environments
         const CONFIG = {
-            // For local development
             LOCAL_API_BASE: "http://127.0.0.1:5001",
-            // For production (GitHub Pages + Railway backend)
             PROD_API_BASE: "https://starfallshop-exchange-production.up.railway.app",
-            // Auto-detect environment with fallback
             API_BASE: window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' 
                 ? "http://127.0.0.1:5001" 
                 : "https://starfallshop-exchange-production.up.railway.app"
         };
 
-        // Test API connectivity
         async function testApiConnection() {
             try {
-                console.log("Testing API connection to:", CONFIG.API_BASE);
                 const response = await fetch(`${CONFIG.API_BASE}/`, {
                     method: 'GET',
                     mode: 'cors',
@@ -551,14 +546,11 @@
                 
                 if (response.ok) {
                     const data = await response.json();
-                    console.log("API is working:", data);
                     return true;
                 } else {
-                    console.error("API test failed:", response.status, response.statusText);
                     return false;
                 }
             } catch (error) {
-                console.error("API connection test failed:", error);
                 return false;
             }
         }
@@ -577,7 +569,6 @@
             const isConnected = await tonConnectUI.connected;
             if (isConnected) {
                 userAddress = tonConnectUI.account.address;
-                console.log("Wallet connected:", userAddress);
             }
         });
 
@@ -652,9 +643,6 @@
                 document.getElementById('loading').style.display = 'block';
                 document.getElementById('exchange-details').style.display = 'none';
 
-                console.log("API Base:", CONFIG.API_BASE);
-                console.log("Creating payment for:", rubAmount, "RUB to address:", userAddress);
-
                 const response = await fetch(`${CONFIG.API_BASE}/create-payment`, {
                     method: "POST",
                     headers: { 
@@ -667,8 +655,6 @@
                         user_address: userAddress
                     }),
                 });
-
-                console.log("Response status:", response.status);
                 
                 if (!response.ok) {
                     const errorText = await response.text();
@@ -676,7 +662,6 @@
                 }
 
                 const data = await response.json();
-                console.log("Payment data received:", data);
                 
                 if (data.error) {
                     throw new Error(data.error);
@@ -685,17 +670,12 @@
                 currentOrderId = data.order_id;
                 currentPaymentId = data.id;
 
-                // Open payment link
                 window.open(data.url, "_blank");
-
-                // Start polling for payment status
                 pollPaymentStatus();
 
             } catch (error) {
-                console.error("Payment error:", error);
                 let errorMessage = "Ошибка создания платежа: " + error.message;
                 
-                // More specific error messages
                 if (error.message.includes("Failed to fetch")) {
                     errorMessage = "Не удается подключиться к серверу. Проверьте интернет-соединение или попробуйте позже.";
                 } else if (error.message.includes("CORS")) {
@@ -711,7 +691,7 @@
         }
 
         async function pollPaymentStatus() {
-            const maxAttempts = 60; // 10 minutes
+            const maxAttempts = 60;
             let attempts = 0;
 
             const checkPayment = async () => {
@@ -725,7 +705,6 @@
                         document.getElementById('loading').style.display = 'none';
                         document.getElementById('success').style.display = 'block';
                         
-                        // Update balances
                         document.getElementById('rub-balance').textContent = '0';
                         document.getElementById('ton-balance').textContent = data.ton_amount?.toFixed(4) || '0';
                         
@@ -736,12 +715,11 @@
 
                     attempts++;
                     if (attempts < maxAttempts) {
-                        setTimeout(checkPayment, 10000); // Check every 10 seconds
+                        setTimeout(checkPayment, 10000);
                     } else {
                         throw new Error("Payment timeout");
                     }
                 } catch (error) {
-                    console.error("Payment check error:", error);
                     document.getElementById('loading').style.display = 'none';
                     document.getElementById('exchange-details').style.display = 'block';
                     alert("Ошибка проверки платежа: " + error.message);
@@ -753,14 +731,8 @@
 
         // Initialize
         document.addEventListener('DOMContentLoaded', async function() {
-            console.log("🌟 StarfallShop Exchange initialized");
-            console.log("API Base:", CONFIG.API_BASE);
-            
-            // Test API connection
             const apiWorking = await testApiConnection();
             if (!apiWorking) {
-                console.warn("⚠️ API connection failed, some features may not work");
-                // You could show a warning to the user here
                 const warningDiv = document.createElement('div');
                 warningDiv.style.cssText = `
                     position: fixed;
@@ -777,7 +749,6 @@
                 warningDiv.textContent = "⚠️ Проблемы с подключением к серверу";
                 document.body.appendChild(warningDiv);
                 
-                // Remove warning after 5 seconds
                 setTimeout(() => {
                     if (warningDiv.parentNode) {
                         warningDiv.parentNode.removeChild(warningDiv);

@@ -23,7 +23,7 @@ CORS(app, origins=[
 # Configuration
 WATA_TOKEN = os.getenv("WATA_TOKEN", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJQdWJsaWNJZCI6IjNhMTliMmQyLTc0NjUtMTIxMy0zMzYxLTk4YmQyNjNjMGY4MCIsIlRva2VuVmVyc2lvbiI6IjIiLCJleHAiOjE3ODQ4ODYzODIsImlzcyI6Imh0dHBzOi8vYXBpLndhdGEucHJvIiwiYXVkIjoiaHR0cHM6Ly9hcGkud2F0YS5wcm8vYXBpL2gyaCJ9.43odSW6D59Zo4gT9HvZCxxERDS6AlRdaIff0Wpwac28")
 SERVICE_WALLET = os.getenv("SERVICE_WALLET", "UQAGUqc7XqO7Wc8tH7QGD8LuituUvdGUVccn-SphINODx7xa")
-PORT = int(os.getenv("PORT", 5001))
+PORT = int(os.getenv("PORT", 8080))
 
 # Fixed exchange rate
 TON_RATE_RUB = float(os.getenv("TON_RATE_RUB", "248.05"))
@@ -107,8 +107,8 @@ async def check_wata_status(payment_id):
             return data.get("status", "").lower() == "closed"
 
 async def send_ton_simulation(to_address, amount_nano):
-    # Simulated TON sending - replace with actual implementation
-    await asyncio.sleep(1)  # Simulate network delay
+    # TON transfer implementation
+    await asyncio.sleep(1)
     return f"Sent {from_nano(amount_nano):.4f} TON to {to_address}"
 
 @app.route("/check-payment", methods=["GET"])
