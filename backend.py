@@ -14,11 +14,12 @@ app = Flask(__name__)
 CORS(app, origins=[
     "http://127.0.0.1:*",
     "http://localhost:*", 
+    "https://vakuumjava.github.io",
     "https://*.github.io",
     "https://*.pages.dev",
     "https://*.vercel.app",
     "https://*.netlify.app"
-], methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Content-Type', 'Accept'])
+], methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Content-Type', 'Accept'], supports_credentials=False)
 
 # Configuration
 WATA_TOKEN = os.getenv("WATA_TOKEN", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJQdWJsaWNJZCI6IjNhMTliMmQyLTc0NjUtMTIxMy0zMzYxLTk4YmQyNjNjMGY4MCIsIlRva2VuVmVyc2lvbiI6IjIiLCJleHAiOjE3ODQ4ODYzODIsImlzcyI6Imh0dHBzOi8vYXBpLndhdGEucHJvIiwiYXVkIjoiaHR0cHM6Ly9hcGkud2F0YS5wcm8vYXBpL2gyaCJ9.43odSW6D59Zo4gT9HvZCxxERDS6AlRdaIff0Wpwac28")
