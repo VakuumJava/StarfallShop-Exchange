@@ -5,6 +5,7 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 import aiohttp
 import uuid
+import time
 
 load_dotenv()
 
@@ -48,6 +49,7 @@ def ton_price():
     return jsonify({"price": TON_RATE_RUB})
 
 async def create_wata_payment_link(amount, order_id):
+    """Create WATA payment link"""
     url = "https://api.wata.pro/api/h2h/links"
     headers = {
         "Content-Type": "application/json",
@@ -59,12 +61,26 @@ async def create_wata_payment_link(amount, order_id):
         "description": "Обмен RUB на TON - @StarfallShopRobot",
         "orderId": order_id
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.post(url, json=payload, headers=headers) as response:
-            if response.status != 200:
-                text = await response.text()
-                raise Exception(f"WATA API Error: {response.status} - {text}")
-            return await response.json()
+    
+    print(f"💳 Creating WATA payment: {amount} RUB, order: {order_id}")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(url, json=payload, headers=headers) as response:
+                print(f"📡 WATA API response: HTTP {response.status}")
+                
+                if response.status != 200:
+                    text = await response.text()
+                    print(f"❌ WATA API Error: {response.status} - {text}")
+                    raise Exception(f"WATA API Error: {response.status} - {text}")
+                
+                data = await response.json()
+                print(f"✅ WATA payment created: {data.get('id', 'N/A')}")
+                return data
+                
+    except Exception as e:
+        print(f"❌ Error creating WATA payment: {e}")
+        raise
 
 @app.route("/create-payment", methods=["POST", "OPTIONS"])
 def create_payment():
@@ -72,48 +88,97 @@ def create_payment():
         return jsonify({"status": "ok"}), 200
         
     try:
-        data = request.json
-        rub_amount = float(data["rub_amount"])
-        user_address = data["user_address"]
-        order_id = str(uuid.uuid4())
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
+        rub_amount = data.get("rub_amount")
+        user_address = data.get("user_address")
+        
+        print(f"💰 Payment request: {rub_amount} RUB for {user_address}")
+        
+        if not rub_amount or not user_address:
+            print("❌ Missing required fields")
+            return jsonify({"error": "rub_amount and user_address required"}), 400
         
         # Validate minimum amount
         if rub_amount < 10:
+            print(f"❌ Amount too small: {rub_amount} RUB")
             return jsonify({"error": "Минимальная сумма: 10 RUB"}), 400
+        
+        # Generate order ID
+        order_id = str(uuid.uuid4())
+        ton_amount = rub_amount / TON_RATE_RUB
+        
+        print(f"📊 Exchange: {rub_amount} RUB → {ton_amount:.4f} TON")
         
         # Store payment info
         payments[order_id] = {
             "rub_amount": rub_amount,
             "user_address": user_address,
             "status": "pending",
-            "ton_amount": rub_amount / TON_RATE_RUB
+            "ton_amount": ton_amount,
+            "created_at": time.time()
         }
         
+        # Create WATA payment
         link_data = asyncio.run(create_wata_payment_link(rub_amount, order_id))
+        
+        print(f"✅ Payment created successfully: {order_id}")
         return jsonify({
             "url": link_data["url"],
             "id": link_data["id"],
             "order_id": order_id
         })
+        
     except Exception as e:
+        print(f"❌ Create payment error: {e}")
         return jsonify({"error": str(e)}), 500
 
 async def check_wata_status(payment_id):
+    """Check WATA payment status"""
     url = f"https://api.wata.pro/api/h2h/links/{payment_id}"
     headers = {
         "Authorization": f"Bearer {WATA_TOKEN}"
     }
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status != 200:
-                return False
-            data = await response.json()
-            return data.get("status", "").lower() == "closed"
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                print(f"🔍 Checking WATA status for {payment_id}: HTTP {response.status}")
+                
+                if response.status != 200:
+                    print(f"❌ WATA API error: {response.status}")
+                    return False
+                    
+                data = await response.json()
+                status = data.get("status", "").lower()
+                print(f"📊 WATA payment status: {status}")
+                
+                # WATA статусы: pending, processing, closed, cancelled
+                return status == "closed"
+                
+    except Exception as e:
+        print(f"❌ Error checking WATA status: {e}")
+        return False
 
 async def send_ton_simulation(to_address, amount_nano):
-    # TON transfer implementation
+    """Simulate TON transfer - replace with real implementation"""
+    print(f"💸 Simulating TON transfer: {from_nano(amount_nano):.4f} TON to {to_address}")
     await asyncio.sleep(1)
-    return f"Sent {from_nano(amount_nano):.4f} TON to {to_address}"
+    
+    # TODO: Replace with real TON transfer
+    # Uncomment and configure when ready:
+    # 
+    # try:
+    #     client = TonlibClient(...)
+    #     wallet = client.wallet_create(...)
+    #     result = await wallet.transfer(to_address, amount_nano)
+    #     return result
+    # except Exception as e:
+    #     raise Exception(f"TON transfer failed: {e}")
+    
+    return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address}"
 
 @app.route("/check-payment", methods=["GET", "OPTIONS"])
 def check_payment():
@@ -124,16 +189,34 @@ def check_payment():
         payment_id = request.args.get("id")
         order_id = request.args.get("order_id")
         
+        print(f"🔍 Checking payment: id={payment_id}, order_id={order_id}")
+        
         if not order_id or not payment_id:
+            print("❌ Missing parameters")
             return jsonify({"status": "error", "message": "Missing parameters"})
         
         if order_id not in payments:
+            print(f"❌ Order {order_id} not found")
             return jsonify({"status": "error", "message": "Order not found"})
         
-        is_paid = asyncio.run(check_wata_status(payment_id))
+        order_info = payments[order_id]
+        print(f"📋 Order info: {order_info}")
         
-        if is_paid and payments[order_id]["status"] == "pending":
-            order_info = payments[order_id]
+        # If already completed, return completed status
+        if order_info["status"] == "completed":
+            print("✅ Order already completed")
+            return jsonify({
+                "status": "completed",
+                "tx": order_info.get("tx", ""),
+                "ton_amount": order_info["ton_amount"]
+            })
+        
+        # Check WATA payment status
+        is_paid = asyncio.run(check_wata_status(payment_id))
+        print(f"💳 WATA payment status: {'PAID' if is_paid else 'PENDING'}")
+        
+        if is_paid and order_info["status"] == "pending":
+            print("🚀 Processing TON transfer...")
             ton_amount = order_info["ton_amount"]
             nano_ton = to_nano(ton_amount)
             
@@ -141,19 +224,22 @@ def check_payment():
                 tx = asyncio.run(send_ton_simulation(order_info["user_address"], nano_ton))
                 payments[order_id]["status"] = "completed"
                 payments[order_id]["tx"] = tx
+                
+                print(f"✅ Transfer completed: {tx}")
                 return jsonify({
                     "status": "completed",
                     "tx": tx,
                     "ton_amount": ton_amount
                 })
             except Exception as e:
-                return jsonify({"status": "error", "message": str(e)})
-        elif is_paid:
-            return jsonify({"status": "completed"})
+                print(f"❌ TON transfer error: {e}")
+                return jsonify({"status": "error", "message": f"Transfer failed: {str(e)}"})
         else:
+            print("⏳ Payment still pending")
             return jsonify({"status": "pending"})
             
     except Exception as e:
+        print(f"❌ Check payment error: {e}")
         return jsonify({"status": "error", "message": str(e)})
 
 # In-memory storage for payments
