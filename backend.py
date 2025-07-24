@@ -219,46 +219,72 @@ async def check_wata_status(payment_id):
             return cached_status == "closed"
         return False
 
+async def send_ton_real(to_address, amount_nano):
+    """Real TON transfer implementation"""
+    print(f"💸 Sending {from_nano(amount_nano):.4f} TON to {to_address}")
+    
+    try:
+        from pytoniq import LiteBalancer, WalletV4R2
+        
+        # Get service wallet mnemonic from environment
+        mnemonic_str = os.getenv("SERVICE_WALLET_MNEMONIC", "")
+        if not mnemonic_str or len(mnemonic_str.strip()) == 0:
+            raise Exception("SERVICE_WALLET_MNEMONIC not configured in environment variables")
+        
+        mnemonic = mnemonic_str.strip().split()
+        if len(mnemonic) != 24:
+            raise Exception(f"Invalid mnemonic: expected 24 words, got {len(mnemonic)}")
+        
+        print(f"🔑 Loading service wallet from mnemonic...")
+        
+        # Connect to TON network
+        provider = LiteBalancer.from_mainnet_config(1)
+        await provider.start_up()
+        print(f"🌐 Connected to TON mainnet")
+        
+        # Load service wallet
+        wallet = await WalletV4R2.from_mnemonic(provider, mnemonic)
+        wallet_address = wallet.address.to_str()
+        print(f"👛 Service wallet loaded: {wallet_address}")
+        
+        # Check wallet balance
+        balance = await wallet.get_balance()
+        balance_ton = from_nano(balance)
+        required_ton = from_nano(amount_nano)
+        
+        print(f"💰 Wallet balance: {balance_ton:.4f} TON")
+        print(f"💸 Required amount: {required_ton:.4f} TON")
+        
+        if balance < amount_nano + 50000000:  # +0.05 TON for fees
+            raise Exception(f"Insufficient balance: {balance_ton:.4f} TON, required: {required_ton + 0.05:.4f} TON")
+        
+        # Send TON
+        print(f"🚀 Initiating transfer...")
+        result = await wallet.transfer(
+            destination=to_address,
+            amount=amount_nano,
+            comment="StarfallShop Exchange - Обмен RUB на TON"
+        )
+        
+        await provider.close_all()
+        
+        tx_hash = result.hash.hex() if hasattr(result, 'hash') else str(result)
+        print(f"✅ TON transfer completed! TX: {tx_hash}")
+        
+        return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} | TX: {tx_hash}"
+        
+    except ImportError:
+        raise Exception("pytoniq library not installed. Run: pip install pytoniq")
+    except Exception as e:
+        print(f"❌ Real TON transfer error: {e}")
+        raise Exception(f"TON transfer failed: {str(e)}")
+
 async def send_ton_simulation(to_address, amount_nano):
-    """Simulate TON transfer - replace with real implementation"""
-    print(f"💸 Simulating TON transfer: {from_nano(amount_nano):.4f} TON to {to_address}")
+    """Simulate TON transfer - DEPRECATED: Use send_ton_real instead"""
+    print(f"⚠️ SIMULATION MODE - Real transfers disabled")
+    print(f"💸 Would send {from_nano(amount_nano):.4f} TON to {to_address}")
     await asyncio.sleep(1)
-    
-    # TODO: Replace with real TON transfer
-    # 
-    # Для реального перевода TON:
-    # 1. Добавьте в .env файл:
-    #    SERVICE_WALLET_MNEMONIC="word1 word2 word3 ... word24"
-    #    или
-    #    SERVICE_WALLET_PRIVATE_KEY="your_private_key"
-    # 
-    # 2. Раскомментируйте код ниже:
-    #
-    # try:
-    #     from pytoniq import LiteBalancer, WalletV4R2
-    #     
-    #     # Подключение к TON
-    #     provider = LiteBalancer.from_mainnet_config(1)
-    #     await provider.start_up()
-    #     
-    #     # Загрузка кошелька
-    #     mnemonic = os.getenv("SERVICE_WALLET_MNEMONIC", "").split()
-    #     if not mnemonic or len(mnemonic) != 24:
-    #         raise Exception("SERVICE_WALLET_MNEMONIC not configured")
-    #     
-    #     wallet = await WalletV4R2.from_mnemonic(provider, mnemonic)
-    #     
-    #     # Отправка TON
-    #     result = await wallet.transfer(to_address, amount_nano, comment="StarfallShop Exchange")
-    #     
-    #     await provider.close_all()
-    #     return f"✅ TON sent: {result}"
-    #     
-    # except Exception as e:
-    #     print(f"❌ Real TON transfer error: {e}")
-    #     raise Exception(f"TON transfer failed: {e}")
-    
-    return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} (СИМУЛЯЦИЯ)"
+    return f"✅ SIMULATION: {from_nano(amount_nano):.4f} TON to {to_address}"
 
 @app.route("/check-payment", methods=["GET", "OPTIONS"])
 def check_payment():
@@ -304,7 +330,7 @@ def check_payment():
             nano_ton = to_nano(ton_amount)
             
             try:
-                tx = asyncio.run(send_ton_simulation(order_info["user_address"], nano_ton))
+                tx = asyncio.run(send_ton_real(order_info["user_address"], nano_ton))
                 payments[order_id]["status"] = "completed"
                 payments[order_id]["tx"] = tx
                 
