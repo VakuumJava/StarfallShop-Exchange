@@ -530,11 +530,11 @@
             // For local development
             LOCAL_API_BASE: "http://127.0.0.1:5001",
             // For production (GitHub Pages + Railway backend)
-            PROD_API_BASE: "https://starfallshop-backend-production.up.railway.app",
+            PROD_API_BASE: "https://starfallshop-exchange-production.up.railway.app",
             // Auto-detect environment
             API_BASE: window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' 
                 ? "http://127.0.0.1:5001" 
-                : "https://starfallshop-backend-production.up.railway.app"
+                : "https://starfallshop-exchange-production.up.railway.app"
         };
 
         const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
