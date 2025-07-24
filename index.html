@@ -509,6 +509,9 @@
                 <div class="loading" id="loading">
                     <div class="spinner"></div>
                     <div>Обработка платежа...</div>
+                    <button onclick="forceRefreshPayment()" class="force-refresh-btn" style="margin-top: 20px; padding: 10px 20px; background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.3); border-radius: 8px; color: white; cursor: pointer; transition: all 0.3s ease;">
+                        🔄 Принудительно проверить
+                    </button>
                 </div>
 
                 <div class="success-message" id="success">
@@ -727,6 +730,58 @@
             };
 
             checkPayment();
+        }
+
+        async function forceRefreshPayment() {
+            if (!currentPaymentId || !currentOrderId) {
+                alert("Нет активного платежа для обновления");
+                return;
+            }
+
+            try {
+                const button = document.querySelector('.force-refresh-btn');
+                button.textContent = '⏳ Проверяем...';
+                button.disabled = true;
+
+                const response = await fetch(`${CONFIG.API_BASE}/force-refresh-payment`, {
+                    method: "POST",
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    mode: 'cors',
+                    body: JSON.stringify({
+                        payment_id: currentPaymentId,
+                        order_id: currentOrderId
+                    }),
+                });
+
+                const data = await response.json();
+                
+                if (data.is_paid) {
+                    // Payment is completed, trigger success
+                    document.getElementById('loading').style.display = 'none';
+                    document.getElementById('success').style.display = 'block';
+                    
+                    document.getElementById('rub-balance').textContent = '0';
+                    document.getElementById('ton-balance').textContent = 'Отправлено';
+                    
+                    alert("🎉 Платеж найден! TON отправляются на ваш кошелек!");
+                } else {
+                    alert("⏳ Платеж все еще не оплачен. Пожалуйста, завершите оплату.");
+                }
+
+                button.textContent = '🔄 Принудительно проверить';
+                button.disabled = false;
+
+            } catch (error) {
+                console.error('Force refresh error:', error);
+                alert("Ошибка при принудительной проверке: " + error.message);
+                
+                const button = document.querySelector('.force-refresh-btn');
+                button.textContent = '🔄 Принудительно проверить';
+                button.disabled = false;
+            }
         }
 
         // Initialize

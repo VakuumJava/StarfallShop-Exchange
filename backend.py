@@ -153,12 +153,41 @@ def create_payment():
         print(f"❌ Create payment error: {e}")
         return jsonify({"error": str(e)}), 500
 
-async def check_wata_status(payment_id):
+@app.route("/force-refresh-payment", methods=["POST"])
+def force_refresh_payment():
+    """Force refresh payment status by clearing cache"""
+    try:
+        data = request.get_json()
+        payment_id = data.get("payment_id")
+        order_id = data.get("order_id")
+        
+        if not payment_id or not order_id:
+            return jsonify({"error": "payment_id and order_id required"}), 400
+            
+        # Clear cache for this payment
+        if payment_id in wata_cache:
+            del wata_cache[payment_id]
+            print(f"🧹 Manually cleared cache for payment {payment_id}")
+        
+        # Force check status
+        is_paid = asyncio.run(check_wata_status(payment_id))
+        
+        return jsonify({
+            "payment_id": payment_id,
+            "order_id": order_id,
+            "is_paid": is_paid,
+            "cache_cleared": True
+        })
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+async def check_wata_status(payment_id, force_refresh=False):
     """Check WATA payment status with caching to avoid 429 errors"""
     current_time = time.time()
     
-    # Check cache first
-    if payment_id in wata_cache:
+    # Check cache first (unless force refresh)
+    if not force_refresh and payment_id in wata_cache:
         cached_data = wata_cache[payment_id]
         if current_time - cached_data['timestamp'] < CACHE_DURATION:
             print(f"🔄 Using cached WATA status for {payment_id}: {cached_data['status']}")
@@ -178,7 +207,7 @@ async def check_wata_status(payment_id):
                 print(f"🔍 Checking WATA status for {payment_id}: HTTP {response.status}")
                 
                 if response.status == 429:
-                    print(f"⚠️ WATA API rate limit hit, using cached data or returning pending")
+                    print(f"⚠️ WATA API rate limit hit")
                     # Return cached data if available, otherwise assume pending
                     if payment_id in wata_cache:
                         cached_status = wata_cache[payment_id]['status']
