@@ -291,8 +291,7 @@ async def send_ton_real(to_address, amount_nano):
         print(f"🚀 Initiating transfer...")
         result = await wallet.transfer(
             destination=to_address,
-            amount=amount_nano,
-            comment="StarfallShop Exchange - Обмен RUB на TON"
+            amount=amount_nano
         )
         
         await provider.close_all()
