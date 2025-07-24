@@ -18,7 +18,7 @@ CORS(app, origins=[
     "https://*.pages.dev",
     "https://*.vercel.app",
     "https://*.netlify.app"
-])
+], methods=['GET', 'POST', 'OPTIONS'], allow_headers=['Content-Type', 'Accept'])
 
 # Configuration
 WATA_TOKEN = os.getenv("WATA_TOKEN", "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJQdWJsaWNJZCI6IjNhMTliMmQyLTc0NjUtMTIxMy0zMzYxLTk4YmQyNjNjMGY4MCIsIlRva2VuVmVyc2lvbiI6IjIiLCJleHAiOjE3ODQ4ODYzODIsImlzcyI6Imh0dHBzOi8vYXBpLndhdGEucHJvIiwiYXVkIjoiaHR0cHM6Ly9hcGkud2F0YS5wcm8vYXBpL2gyaCJ9.43odSW6D59Zo4gT9HvZCxxERDS6AlRdaIff0Wpwac28")
@@ -65,8 +65,11 @@ async def create_wata_payment_link(amount, order_id):
                 raise Exception(f"WATA API Error: {response.status} - {text}")
             return await response.json()
 
-@app.route("/create-payment", methods=["POST"])
+@app.route("/create-payment", methods=["POST", "OPTIONS"])
 def create_payment():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+        
     try:
         data = request.json
         rub_amount = float(data["rub_amount"])
@@ -111,8 +114,11 @@ async def send_ton_simulation(to_address, amount_nano):
     await asyncio.sleep(1)
     return f"Sent {from_nano(amount_nano):.4f} TON to {to_address}"
 
-@app.route("/check-payment", methods=["GET"])
+@app.route("/check-payment", methods=["GET", "OPTIONS"])
 def check_payment():
+    if request.method == "OPTIONS":
+        return jsonify({"status": "ok"}), 200
+        
     try:
         payment_id = request.args.get("id")
         order_id = request.args.get("order_id")
