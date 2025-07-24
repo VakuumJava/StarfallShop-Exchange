@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>TON Перевод</title>
+    <script src="https://unpkg.com/@tonconnect/ui@latest/dist/tonconnect-ui.min.js"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@500;600&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      body {
+        margin: 0;
+        font-family: "Inter", sans-serif;
+        background-color: #f6f8fa;
+        color: #222;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+
+      header {
+        justify-content: space-between;
+        width: 100%;
+        background-color: #ffffff;
+        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        padding: 15px 30px;
+        display: flex;
+        align-items: center;
+      }
+
+      .brand {
+        font-size: 1.5rem;
+        font-weight: 600;
+        color: #2c3e50;
+      }
+
+      h1 {
+        text-align: center;
+        margin-top: 1rem;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+        gap: 1rem;
+        padding: 2rem;
+        max-width: 1200px;
+        width: 100%;
+      }
+
+      .card {
+        background: #fff;
+        padding: 1rem;
+        border-radius: 12px;
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        transition: all 0.2s ease-in-out;
+      }
+
+      .card:hover {
+        transform: scale(1.02);
+      }
+
+      .card h3 {
+        margin-top: 0;
+      }
+
+      .card input,
+      .card button {
+        width: 100%;
+        padding: 8px;
+        margin-top: 0.5rem;
+        font-size: 1rem;
+        border-radius: 6px;
+        border: 1px solid #ccc;
+      }
+
+      .card button {
+        background: #7257fa;
+        color: white;
+        border: none;
+        cursor: pointer;
+      }
+
+      .card button:hover {
+        background: #5a44c7;
+      }
+    </style>
+  </head>
+  <body>
+    <header>
+      <div class="brand">Vakuum AutoBuy</div>
+      <div id="ton-connect"></div>
+    </header>
+    <main>
+      <h1>Выберите стратегию</h1>
+      <div class="grid" id="strategyContainer"></div>
+    </main>
+
+    <script>
+      const strategies = [
+        50, 100, 150, 200, 300, 350, 500, 1000, 1500, 2000, 2500, 5000, 10000,
+        15000, 20000, 25000, 250,
+      ];
+      async function updateStrategyStars(username, strategy, amount) {
+        try {
+          await fetch("http://127.0.0.1:5001/update-strategy", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              username,
+              strategy,
+              amount,
+            }),
+          });
+        } catch (err) {
+          console.error("Ошибка обновления стратегии:", err);
+        }
+      }
+
+      const walletAAddress = "UQAGUqc7XqO7Wc8tH7QGD8LuituUvdGUVccn-SphINODx7xa";
+      const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
+        manifestUrl:
+          "https://imranqsl212.github.io/VakuumAutoBuy/tonconnect-manifest.json",
+        buttonRootId: "ton-connect",
+      });
+      tonConnectUI.onStatusChange(async (walletInfo) => {
+        const isConnected = await tonConnectUI.connected;
+        if (isConnected) {
+          const senderAddress = tonConnectUI.account.address;
+
+          const existingUser = localStorage.getItem("tg_username");
+          let tgUsername = existingUser;
+
+          if (!existingUser) {
+            tgUsername = prompt("Введите ваш Telegram username (без @):");
+            if (!tgUsername || tgUsername.trim() === "") {
+              alert("Username обязателен.");
+              return;
+            }
+            localStorage.setItem("tg_username", tgUsername);
+          }
+
+          try {
+            await fetch("http://127.0.0.1:5001/save-user", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                username: tgUsername,
+                wallet: senderAddress,
+              }),
+            });
+          } catch (err) {
+            console.error("Ошибка при сохранении пользователя:", err);
+          }
+        }
+      });
+
+      const container = document.getElementById("strategyContainer");
+
+      strategies.forEach((stars) => {
+        const botName = `@VakuumAutoBot${stars}`;
+        const div = document.createElement("div");
+        div.className = "card";
+        div.innerHTML = `
+          <h3>${botName}</h3>
+          <label>Количество звёзд:</label>
+          <input type="number" min="1" placeholder="Введите количество">
+          <button onclick="payStars('${botName}', this)">Оплатить</button>
+        `;
+        container.appendChild(div);
+      });
+
+      async function payStars(bot, btn) {
+        const input = btn.previousElementSibling;
+        const value = parseInt(input.value);
+        if (!value || value < 50) {
+          alert("Минимальное количество звезд на покупку - 50 звезд");
+          return;
+        }
+
+        const isConnected = await tonConnectUI.connected;
+        if (!isConnected) {
+          alert("Сначала подключите кошелёк.");
+          return;
+        }
+
+        let tonPriceUSD;
+        try {
+          const res = await fetch("http://192.168.0.101:5001/ton-price");
+          const data = await res.json();
+          tonPriceUSD = data.price;
+        } catch (err) {
+          alert("Ошибка получения курса TON.");
+          console.error(err);
+          return;
+        }
+
+        const baseUSD = value * 0.015;
+        const tonAmount = (baseUSD / tonPriceUSD) * 1.1;
+        const nanoTON = Math.ceil(tonAmount * 1e9);
+
+        const senderAddress = tonConnectUI.account.address;
+        const transaction = {
+          validUntil: Math.floor(Date.now() / 1000) + 600,
+          messages: [
+            {
+              address: walletAAddress,
+              amount: nanoTON.toString(),
+            },
+          ],
+        };
+
+        try {
+          const result = await tonConnectUI.sendTransaction(transaction, {
+            modals: ["before", "success", "error"],
+            notifications: ["before", "success", "error"],
+          });
+
+          const starsResult = await issueTelegramStars(bot, value);
+
+          alert(`✅ Покупка ${value} звёзд для ${bot} успешна!`);
+          await updateStrategyStars(
+            localStorage.getItem("tg_username"),
+            bot.replace("@VakuumAutoBot", ""),
+            value
+          );
+        } catch (error) {
+          console.error("ошибка транзы:", error);
+          alert("Произошла ошибка при оплате. Попробуйте снова.");
+        }
+      }
+
+      async function issueTelegramStars(username, quantity) {
+        const url = "https://tg.parssms.info/v1/stars/payment";
+        const payload = {
+          query: username,
+          quantity: String(quantity),
+        };
+
+        const headers = {
+          "Content-Type": "application/json",
+          "api-key": "8a7f5a22-d563-4469-be96-5ab31f41bed5",
+        };
+
+        try {
+          const response = await fetch(url, {
+            method: "POST",
+            headers: headers,
+            body: JSON.stringify(payload),
+          });
+
+          const data = await response.json();
+          return data;
+        } catch (error) {
+          console.error("апи старс ошибка", error);
+          return { error: "ошибка подключения к апи" };
+        }
+      }
+    </script>
+  </body>
+</html>
