@@ -531,11 +531,37 @@
             LOCAL_API_BASE: "http://127.0.0.1:5001",
             // For production (GitHub Pages + Railway backend)
             PROD_API_BASE: "https://starfallshop-exchange-production.up.railway.app",
-            // Auto-detect environment
+            // Auto-detect environment with fallback
             API_BASE: window.location.hostname === '127.0.0.1' || window.location.hostname === 'localhost' 
                 ? "http://127.0.0.1:5001" 
                 : "https://starfallshop-exchange-production.up.railway.app"
         };
+
+        // Test API connectivity
+        async function testApiConnection() {
+            try {
+                console.log("Testing API connection to:", CONFIG.API_BASE);
+                const response = await fetch(`${CONFIG.API_BASE}/`, {
+                    method: 'GET',
+                    mode: 'cors',
+                    headers: {
+                        'Accept': 'application/json'
+                    }
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log("API is working:", data);
+                    return true;
+                } else {
+                    console.error("API test failed:", response.status, response.statusText);
+                    return false;
+                }
+            } catch (error) {
+                console.error("API connection test failed:", error);
+                return false;
+            }
+        }
 
         const tonConnectUI = new TON_CONNECT_UI.TonConnectUI({
             manifestUrl: "https://imranqsl212.github.io/VakuumAutoBuy/tonconnect-manifest.json",
@@ -626,16 +652,31 @@
                 document.getElementById('loading').style.display = 'block';
                 document.getElementById('exchange-details').style.display = 'none';
 
+                console.log("API Base:", CONFIG.API_BASE);
+                console.log("Creating payment for:", rubAmount, "RUB to address:", userAddress);
+
                 const response = await fetch(`${CONFIG.API_BASE}/create-payment`, {
                     method: "POST",
-                    headers: { "Content-Type": "application/json" },
+                    headers: { 
+                        "Content-Type": "application/json",
+                        "Accept": "application/json"
+                    },
+                    mode: 'cors',
                     body: JSON.stringify({
                         rub_amount: rubAmount,
                         user_address: userAddress
                     }),
                 });
 
+                console.log("Response status:", response.status);
+                
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    throw new Error(`HTTP ${response.status}: ${errorText}`);
+                }
+
                 const data = await response.json();
+                console.log("Payment data received:", data);
                 
                 if (data.error) {
                     throw new Error(data.error);
@@ -652,7 +693,18 @@
 
             } catch (error) {
                 console.error("Payment error:", error);
-                alert("Ошибка создания платежа: " + error.message);
+                let errorMessage = "Ошибка создания платежа: " + error.message;
+                
+                // More specific error messages
+                if (error.message.includes("Failed to fetch")) {
+                    errorMessage = "Не удается подключиться к серверу. Проверьте интернет-соединение или попробуйте позже.";
+                } else if (error.message.includes("CORS")) {
+                    errorMessage = "Ошибка CORS. Обратитесь к администратору.";
+                } else if (error.message.includes("NetworkError")) {
+                    errorMessage = "Ошибка сети. Проверьте подключение к интернету.";
+                }
+                
+                alert(errorMessage);
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('exchange-details').style.display = 'block';
             }
@@ -700,9 +752,38 @@
         }
 
         // Initialize
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             console.log("🌟 StarfallShop Exchange initialized");
             console.log("API Base:", CONFIG.API_BASE);
+            
+            // Test API connection
+            const apiWorking = await testApiConnection();
+            if (!apiWorking) {
+                console.warn("⚠️ API connection failed, some features may not work");
+                // You could show a warning to the user here
+                const warningDiv = document.createElement('div');
+                warningDiv.style.cssText = `
+                    position: fixed;
+                    top: 10px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    background: rgba(255, 193, 7, 0.9);
+                    color: black;
+                    padding: 10px 20px;
+                    border-radius: 10px;
+                    z-index: 1000;
+                    font-size: 14px;
+                `;
+                warningDiv.textContent = "⚠️ Проблемы с подключением к серверу";
+                document.body.appendChild(warningDiv);
+                
+                // Remove warning after 5 seconds
+                setTimeout(() => {
+                    if (warningDiv.parentNode) {
+                        warningDiv.parentNode.removeChild(warningDiv);
+                    }
+                }, 5000);
+            }
         });
     </script>
 </body>
