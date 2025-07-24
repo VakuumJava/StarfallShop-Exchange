@@ -168,17 +168,40 @@ async def send_ton_simulation(to_address, amount_nano):
     await asyncio.sleep(1)
     
     # TODO: Replace with real TON transfer
-    # Uncomment and configure when ready:
     # 
+    # Для реального перевода TON:
+    # 1. Добавьте в .env файл:
+    #    SERVICE_WALLET_MNEMONIC="word1 word2 word3 ... word24"
+    #    или
+    #    SERVICE_WALLET_PRIVATE_KEY="your_private_key"
+    # 
+    # 2. Раскомментируйте код ниже:
+    #
     # try:
-    #     client = TonlibClient(...)
-    #     wallet = client.wallet_create(...)
-    #     result = await wallet.transfer(to_address, amount_nano)
-    #     return result
+    #     from pytoniq import LiteBalancer, WalletV4R2
+    #     
+    #     # Подключение к TON
+    #     provider = LiteBalancer.from_mainnet_config(1)
+    #     await provider.start_up()
+    #     
+    #     # Загрузка кошелька
+    #     mnemonic = os.getenv("SERVICE_WALLET_MNEMONIC", "").split()
+    #     if not mnemonic or len(mnemonic) != 24:
+    #         raise Exception("SERVICE_WALLET_MNEMONIC not configured")
+    #     
+    #     wallet = await WalletV4R2.from_mnemonic(provider, mnemonic)
+    #     
+    #     # Отправка TON
+    #     result = await wallet.transfer(to_address, amount_nano, comment="StarfallShop Exchange")
+    #     
+    #     await provider.close_all()
+    #     return f"✅ TON sent: {result}"
+    #     
     # except Exception as e:
+    #     print(f"❌ Real TON transfer error: {e}")
     #     raise Exception(f"TON transfer failed: {e}")
     
-    return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address}"
+    return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} (СИМУЛЯЦИЯ)"
 
 @app.route("/check-payment", methods=["GET", "OPTIONS"])
 def check_payment():
