@@ -715,7 +715,7 @@
 
                     attempts++;
                     if (attempts < maxAttempts) {
-                        setTimeout(checkPayment, 10000);
+                        setTimeout(checkPayment, 20000);
                     } else {
                         throw new Error("Payment timeout");
                     }

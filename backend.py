@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import aiohttp
 import uuid
 import time
+from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -29,6 +30,23 @@ PORT = int(os.getenv("PORT", 8080))
 
 # Fixed exchange rate
 TON_RATE_RUB = float(os.getenv("TON_RATE_RUB", "248.05"))
+
+# Cache for WATA API responses to avoid 429 errors
+wata_cache = {}
+CACHE_DURATION = 30  # seconds
+
+def cleanup_wata_cache():
+    """Clean up expired cache entries"""
+    current_time = time.time()
+    expired_keys = [
+        key for key, data in wata_cache.items() 
+        if current_time - data['timestamp'] > CACHE_DURATION * 2
+    ]
+    for key in expired_keys:
+        del wata_cache[key]
+    
+    if expired_keys:
+        print(f"🧹 Cleaned up {len(expired_keys)} expired cache entries")
 
 def to_nano(amount):
     return int(amount * 1e9)
@@ -136,7 +154,16 @@ def create_payment():
         return jsonify({"error": str(e)}), 500
 
 async def check_wata_status(payment_id):
-    """Check WATA payment status"""
+    """Check WATA payment status with caching to avoid 429 errors"""
+    current_time = time.time()
+    
+    # Check cache first
+    if payment_id in wata_cache:
+        cached_data = wata_cache[payment_id]
+        if current_time - cached_data['timestamp'] < CACHE_DURATION:
+            print(f"🔄 Using cached WATA status for {payment_id}: {cached_data['status']}")
+            return cached_data['status'] == "closed"
+    
     url = f"https://api.wata.pro/api/h2h/links/{payment_id}"
     headers = {
         "Authorization": f"Bearer {WATA_TOKEN}"
@@ -144,22 +171,52 @@ async def check_wata_status(payment_id):
     
     try:
         async with aiohttp.ClientSession() as session:
+            # Add delay to avoid rate limiting
+            await asyncio.sleep(1)
+            
             async with session.get(url, headers=headers) as response:
                 print(f"🔍 Checking WATA status for {payment_id}: HTTP {response.status}")
                 
+                if response.status == 429:
+                    print(f"⚠️ WATA API rate limit hit, using cached data or returning pending")
+                    # Return cached data if available, otherwise assume pending
+                    if payment_id in wata_cache:
+                        cached_status = wata_cache[payment_id]['status']
+                        print(f"🔄 Using cached status: {cached_status}")
+                        return cached_status == "closed"
+                    else:
+                        print("⏳ No cached data, assuming pending")
+                        return False
+                
                 if response.status != 200:
                     print(f"❌ WATA API error: {response.status}")
+                    # Return cached data if available
+                    if payment_id in wata_cache:
+                        cached_status = wata_cache[payment_id]['status']
+                        print(f"🔄 Using cached status due to error: {cached_status}")
+                        return cached_status == "closed"
                     return False
                     
                 data = await response.json()
                 status = data.get("status", "").lower()
                 print(f"📊 WATA payment status: {status}")
                 
-                # WATA статусы: pending, processing, closed, cancelled
+                # Cache the result
+                wata_cache[payment_id] = {
+                    'status': status,
+                    'timestamp': current_time
+                }
+                
+                # WATA статусы: pending, processing, opened, closed, cancelled
                 return status == "closed"
                 
     except Exception as e:
         print(f"❌ Error checking WATA status: {e}")
+        # Return cached data if available
+        if payment_id in wata_cache:
+            cached_status = wata_cache[payment_id]['status']
+            print(f"🔄 Using cached status due to exception: {cached_status}")
+            return cached_status == "closed"
         return False
 
 async def send_ton_simulation(to_address, amount_nano):
@@ -233,6 +290,9 @@ def check_payment():
                 "tx": order_info.get("tx", ""),
                 "ton_amount": order_info["ton_amount"]
             })
+        
+        # Clean up old cache entries periodically
+        cleanup_wata_cache()
         
         # Check WATA payment status
         is_paid = asyncio.run(check_wata_status(payment_id))
