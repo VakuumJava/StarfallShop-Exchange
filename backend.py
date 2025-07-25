@@ -275,42 +275,73 @@ async def send_ton_real(to_address, amount_nano):
         if len(mnemonic) != 24:
             raise Exception(f"Invalid mnemonic: expected 24 words, got {len(mnemonic)}")
         
-        print(f"🔑 Loading service wallet from mnemonic...")
+        print(f"🔑 Loading wallet...")
         
         # Connect to TON network
-        provider = LiteBalancer.from_mainnet_config(1)
-        await provider.start_up()
-        print(f"🌐 Connected to TON mainnet")
+        print(f"🌐 Connecting to TON network...")
+        try:
+            provider = LiteBalancer.from_mainnet_config(1)
+            await provider.start_up()
+            print(f"✅ Connected to TON mainnet")
+        except Exception as e:
+            print(f"⚠️ Mainnet connection failed: {e}")
+            print(f"🔄 Trying alternative mainnet config...")
+            try:
+                provider = LiteBalancer.from_mainnet_config(2)
+                await provider.start_up()
+                print(f"✅ Connected to TON mainnet (config 2)")
+            except Exception as e2:
+                print(f"❌ All mainnet configs failed: {e2}")
+                raise Exception(f"Cannot connect to TON network: {str(e2)}")
         
         # Load service wallet
-        wallet = await WalletV5R1.from_mnemonic(provider, mnemonic)
-        wallet_address = wallet.address.to_str()
-        print(f"👛 Service wallet loaded: {wallet_address}")
+        print(f"🔑 Loading wallet...")
+        try:
+            wallet = await WalletV5R1.from_mnemonic(provider, mnemonic)
+            wallet_address = wallet.address.to_str()
+            print(f"👛 Service wallet loaded: {wallet_address}")
+        except Exception as e:
+            print(f"⚠️ Wallet loading error: {e}")
+            await provider.close_all()
+            raise Exception(f"Wallet loading failed: {str(e)}")
         
-        # Check wallet balance
-        balance = await wallet.get_balance()
-        balance_ton = from_nano(balance)
-        required_ton = from_nano(amount_nano)
+        # Check wallet balance with retry
+        print(f"💰 Checking wallet balance...")
+        try:
+            balance = await wallet.get_balance()
+            balance_ton = from_nano(balance)
+            required_ton = from_nano(amount_nano)
+            
+            print(f"💰 Wallet balance: {balance_ton:.4f} TON")
+            print(f"💸 Required amount: {required_ton:.4f} TON")
+            
+            if balance < amount_nano + 50000000:  # +0.05 TON for fees
+                await provider.close_all()
+                raise Exception(f"Insufficient balance: {balance_ton:.4f} TON, required: {required_ton + 0.05:.4f} TON")
+                
+        except Exception as e:
+            print(f"❌ Balance check failed: {e}")
+            await provider.close_all()
+            raise Exception(f"Balance check failed: {str(e)}")
         
-        print(f"💰 Wallet balance: {balance_ton:.4f} TON")
-        print(f"💸 Required amount: {required_ton:.4f} TON")
-        
-        if balance < amount_nano + 50000000:  # +0.05 TON for fees
-            raise Exception(f"Insufficient balance: {balance_ton:.4f} TON, required: {required_ton + 0.05:.4f} TON")
-        
-        # Send TON
+        # Send TON with retry
         print(f"🚀 Initiating transfer...")
-        result = await wallet.transfer(
-            destination=to_address,
-            amount=amount_nano
-        )
-        
-        await provider.close_all()
-        
-        tx_hash = result.hash.hex() if hasattr(result, 'hash') else str(result)
-        print(f"✅ TON transfer completed! TX: {tx_hash}")
-        
-        return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} | TX: {tx_hash}"
+        try:
+            result = await wallet.transfer(
+                destination=to_address,
+                amount=amount_nano
+            )
+            
+            tx_hash = result.hash.hex() if hasattr(result, 'hash') else str(result)
+            print(f"✅ TON transfer completed! TX: {tx_hash}")
+            
+            await provider.close_all()
+            return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} | TX: {tx_hash}"
+            
+        except Exception as e:
+            print(f"❌ Transfer failed: {e}")
+            await provider.close_all()
+            raise Exception(f"Transfer failed: {str(e)}")
         
     except Exception as e:
         print(f"❌ Real TON transfer error: {e}")
