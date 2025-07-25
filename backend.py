@@ -7,6 +7,7 @@ import aiohttp
 import uuid
 import time
 from datetime import datetime, timedelta
+import random
 
 load_dotenv()
 
@@ -53,6 +54,135 @@ def to_nano(amount):
 
 def from_nano(nano):
     return nano / 1e9
+
+# ---------------- TON provider helpers ----------------
+STATIC_LITESERVERS = [
+    {
+        "ip": 109,
+        "port": 48888,
+        "id": {"@type": "pub.ed25519", "key": "aF91CuUHuuOv9rm2W5+O/4h38M3sRm+KDoFvPb2Nca0="},
+    },
+    {
+        "ip": 159,
+        "port": 49236,
+        "id": {"@type": "pub.ed25519", "key": "3XO67K5i1F2d4uNbgkSFgX1d8v5gq2nF1qeJ4qL+Ku0="},
+    },
+    {
+        "ip": 65,
+        "port": 49616,
+        "id": {"@type": "pub.ed25519", "key": "0v1zQQJ0lWQEGnGX3l3x5Oc1P8qZvCgPyVcE8JhJXK4="},
+    },
+]
+
+async def _provider_from_global():
+    """Try to build provider from fresh global config"""
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get("https://ton.org/global-config.json", timeout=10) as resp:
+                if resp.status != 200:
+                    raise Exception(f"HTTP {resp.status}")
+                cfg = await resp.json()
+        from pytoniq import LiteBalancer
+        provider = LiteBalancer.from_config(cfg)
+        await asyncio.wait_for(provider.start_up(), timeout=10)
+        return provider
+    except Exception as e:
+        raise Exception(f"global config failed: {e}")
+
+async def _provider_from_builtin(idx: int):
+    try:
+        from pytoniq import LiteBalancer
+        provider = LiteBalancer.from_mainnet_config(idx)
+        await asyncio.wait_for(provider.start_up(), timeout=10)
+        return provider
+    except Exception as e:
+        raise Exception(f"builtin config {idx} failed: {e}")
+
+async def _provider_from_static():
+    try:
+        from pytoniq import LiteBalancer
+        cfg = {"liteservers": STATIC_LITESERVERS}
+        provider = LiteBalancer.from_config(cfg)
+        await asyncio.wait_for(provider.start_up(), timeout=10)
+        return provider
+    except Exception as e:
+        raise Exception(f"static config failed: {e}")
+
+async def get_ton_provider(max_attempts: int = 5):
+    """Return a connected provider or raise."""
+    attempts = []
+    # 1. Fresh global config
+    attempts.append(_provider_from_global)
+    # 2. Built-in configs 0-2
+    for i in range(3):
+        attempts.append(lambda idx=i: _provider_from_builtin(idx))
+    # 3. Static fallback
+    attempts.append(_provider_from_static)
+
+    random.shuffle(attempts)  # randomize order a bit
+
+    last_err = None
+    for fn in attempts[:max_attempts]:
+        try:
+            provider = await fn()
+            print("✅ Connected to TON network")
+            return provider
+        except Exception as e:
+            last_err = e
+            print(f"⚠️ Provider attempt failed: {e}")
+    raise Exception(last_err or "have no alive peers")
+
+# -------------- Replace send_ton_real ------------------
+async def send_ton_real(to_address: str, amount_nano: int):
+    """Send TON with robust retries."""
+    print(f"💸 Sending {from_nano(amount_nano):.4f} TON to {to_address}")
+
+    # choose wallet class
+    try:
+        from pytoniq import WalletV5R1 as _Wallet
+    except ImportError:
+        from pytoniq import WalletV4R2 as _Wallet
+    WalletClass = _Wallet
+
+    mnemonic_str = os.getenv("SERVICE_WALLET_MNEMONIC", "").strip()
+    if not mnemonic_str:
+        raise Exception("SERVICE_WALLET_MNEMONIC not configured")
+    mnemonic = mnemonic_str.split()
+    if len(mnemonic) != 24:
+        raise Exception("Invalid mnemonic length")
+
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        print(f"🔄 TON transfer attempt {attempt}/{max_attempts}")
+        provider = None
+        try:
+            provider = await get_ton_provider()
+            wallet = await WalletClass.from_mnemonic(provider, mnemonic)
+            balance = await wallet.get_balance()
+            if balance < amount_nano + 50000000:
+                raise Exception("Insufficient balance for transfer + fees")
+            result = await wallet.transfer(destination=to_address, amount=amount_nano)
+            tx_hash = result.hash.hex() if hasattr(result, "hash") else str(result)
+            print(f"✅ TON transfer completed! TX: {tx_hash}")
+            await provider.close_all()
+            return f"✅ Sent {from_nano(amount_nano):.4f} TON | TX: {tx_hash}"
+        except Exception as e:
+            print(f"❌ Attempt {attempt} failed: {e}")
+            if provider:
+                try:
+                    await provider.close_all()
+                except Exception:
+                    pass
+            if attempt == max_attempts:
+                raise Exception(f"TON transfer failed after {max_attempts} attempts: {e}")
+            await asyncio.sleep(2)  # small backoff
+
+async def send_ton_simulation(to_address, amount_nano):
+    """Simulate TON transfer - DEPRECATED: Use send_ton_real instead"""
+    print(f"⚠️ SIMULATION MODE - Real transfers disabled")
+    print(f"💸 Would send {from_nano(amount_nano):.4f} TON to {to_address}")
+    await asyncio.sleep(1)
+    return f"✅ SIMULATION: {from_nano(amount_nano):.4f} TON to {to_address}"
 
 @app.route("/", methods=["GET"])
 def health_check():
@@ -248,179 +378,47 @@ async def check_wata_status(payment_id, force_refresh=False):
             return cached_status == "closed"
         return False
 
-async def send_ton_real(to_address, amount_nano):
-    """Real TON transfer implementation"""
-    print(f"💸 Sending {from_nano(amount_nano):.4f} TON to {to_address}")
-    
-    try:
-        # Try to import pytoniq
-        try:
-            from pytoniq import LiteBalancer, WalletV5R1
-            print(f"✅ pytoniq imported successfully")
-        except ImportError as e:
-            print(f"❌ pytoniq import failed: {e}")
-            # Try alternative import
-            try:
-                from pytoniq import LiteBalancer, WalletV4R2 as WalletV5R1
-                print(f"✅ Using WalletV4R2 as fallback")
-            except ImportError:
-                raise Exception("pytoniq library not available. Please check Railway deployment logs.")
-        
-        # Get service wallet mnemonic from environment
-        mnemonic_str = os.getenv("SERVICE_WALLET_MNEMONIC", "")
-        if not mnemonic_str or len(mnemonic_str.strip()) == 0:
-            raise Exception("SERVICE_WALLET_MNEMONIC not configured in environment variables")
-        
-        mnemonic = mnemonic_str.strip().split()
-        if len(mnemonic) != 24:
-            raise Exception(f"Invalid mnemonic: expected 24 words, got {len(mnemonic)}")
-        
-        print(f"🔑 Loading wallet...")
-        
-        # Connect to TON network
-        print(f"🌐 Connecting to TON network...")
-        try:
-            provider = LiteBalancer.from_mainnet_config(1)
-            await provider.start_up()
-            print(f"✅ Connected to TON mainnet")
-        except Exception as e:
-            print(f"⚠️ Mainnet connection failed: {e}")
-            print(f"🔄 Trying alternative mainnet config...")
-            try:
-                provider = LiteBalancer.from_mainnet_config(2)
-                await provider.start_up()
-                print(f"✅ Connected to TON mainnet (config 2)")
-            except Exception as e2:
-                print(f"❌ All mainnet configs failed: {e2}")
-                raise Exception(f"Cannot connect to TON network: {str(e2)}")
-        
-        # Load service wallet
-        print(f"🔑 Loading wallet...")
-        try:
-            wallet = await WalletV5R1.from_mnemonic(provider, mnemonic)
-            wallet_address = wallet.address.to_str()
-            print(f"👛 Service wallet loaded: {wallet_address}")
-        except Exception as e:
-            print(f"⚠️ Wallet loading error: {e}")
-            await provider.close_all()
-            raise Exception(f"Wallet loading failed: {str(e)}")
-        
-        # Check wallet balance with retry
-        print(f"💰 Checking wallet balance...")
-        try:
-            balance = await wallet.get_balance()
-            balance_ton = from_nano(balance)
-            required_ton = from_nano(amount_nano)
-            
-            print(f"💰 Wallet balance: {balance_ton:.4f} TON")
-            print(f"💸 Required amount: {required_ton:.4f} TON")
-            
-            if balance < amount_nano + 50000000:  # +0.05 TON for fees
-                await provider.close_all()
-                raise Exception(f"Insufficient balance: {balance_ton:.4f} TON, required: {required_ton + 0.05:.4f} TON")
-                
-        except Exception as e:
-            print(f"❌ Balance check failed: {e}")
-            await provider.close_all()
-            raise Exception(f"Balance check failed: {str(e)}")
-        
-        # Send TON with retry
-        print(f"🚀 Initiating transfer...")
-        try:
-            result = await wallet.transfer(
-                destination=to_address,
-                amount=amount_nano
-            )
-            
-            tx_hash = result.hash.hex() if hasattr(result, 'hash') else str(result)
-            print(f"✅ TON transfer completed! TX: {tx_hash}")
-            
-            await provider.close_all()
-            return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} | TX: {tx_hash}"
-            
-        except Exception as e:
-            print(f"❌ Transfer failed: {e}")
-            await provider.close_all()
-            raise Exception(f"Transfer failed: {str(e)}")
-        
-    except Exception as e:
-        print(f"❌ Real TON transfer error: {e}")
-        raise Exception(f"TON transfer failed: {str(e)}")
-
-async def send_ton_simulation(to_address, amount_nano):
-    """Simulate TON transfer - DEPRECATED: Use send_ton_real instead"""
-    print(f"⚠️ SIMULATION MODE - Real transfers disabled")
-    print(f"💸 Would send {from_nano(amount_nano):.4f} TON to {to_address}")
-    await asyncio.sleep(1)
-    return f"✅ SIMULATION: {from_nano(amount_nano):.4f} TON to {to_address}"
-
-@app.route("/check-payment", methods=["GET", "OPTIONS"])
-def check_payment():
-    if request.method == "OPTIONS":
-        return jsonify({"status": "ok"}), 200
-        
-    try:
-        payment_id = request.args.get("id")
-        order_id = request.args.get("order_id")
-        
-        print(f"🔍 Checking payment: id={payment_id}, order_id={order_id}")
-        
-        if not order_id or not payment_id:
-            print("❌ Missing parameters")
-            return jsonify({"status": "error", "message": "Missing parameters"})
-        
-        if order_id not in payments:
-            print(f"❌ Order {order_id} not found")
-            return jsonify({"status": "error", "message": "Order not found"})
-        
-        order_info = payments[order_id]
-        print(f"📋 Order info: {order_info}")
-        
-        # If already completed, return completed status
-        if order_info["status"] == "completed":
-            print("✅ Order already completed")
-            return jsonify({
-                "status": "completed",
-                "tx": order_info.get("tx", ""),
-                "ton_amount": order_info["ton_amount"]
-            })
-        
-        # Clean up old cache entries periodically
-        cleanup_wata_cache()
-        
-        # Check WATA payment status
-        is_paid = asyncio.run(check_wata_status(payment_id))
-        print(f"💳 WATA payment status: {'PAID' if is_paid else 'PENDING'}")
-        
-        if is_paid and order_info["status"] == "pending":
-            print("🚀 Processing TON transfer...")
-            ton_amount = order_info["ton_amount"]
-            nano_ton = to_nano(ton_amount)
-            
-            try:
-                tx = asyncio.run(send_ton_real(order_info["user_address"], nano_ton))
-                payments[order_id]["status"] = "completed"
-                payments[order_id]["tx"] = tx
-                
-                print(f"✅ Transfer completed: {tx}")
-                return jsonify({
-                    "status": "completed",
-                    "tx": tx,
-                    "ton_amount": ton_amount
-                })
-            except Exception as e:
-                print(f"❌ TON transfer error: {e}")
-                return jsonify({"status": "error", "message": f"Transfer failed: {str(e)}"})
-        else:
-            print("⏳ Payment still pending")
-            return jsonify({"status": "pending"})
-            
-    except Exception as e:
-        print(f"❌ Check payment error: {e}")
-        return jsonify({"status": "error", "message": str(e)})
-
 # In-memory storage for payments
 payments = {}
+
+# ---------------- Ensure /check-payment route exists ----------------
+try:
+    payments  # noqa: F401
+except NameError:
+    payments = {}
+
+# Only add the route if it was removed accidentally
+if not any(getattr(rule, 'rule', None) == '/check-payment' for rule in app.url_map.iter_rules()):
+    @app.route('/check-payment', methods=['GET', 'OPTIONS'])
+    def check_payment():
+        if request.method == 'OPTIONS':
+            return jsonify({'status': 'ok'}), 200
+        try:
+            payment_id = request.args.get('id')
+            order_id = request.args.get('order_id')
+            print(f'🔍 Checking payment: id={payment_id}, order_id={order_id}')
+            if not payment_id or not order_id:
+                return jsonify({'status': 'error', 'message': 'Missing parameters'})
+            if order_id not in payments:
+                return jsonify({'status': 'error', 'message': 'Order not found'})
+            order = payments[order_id]
+            if order['status'] == 'completed':
+                return jsonify({'status': 'completed', 'tx': order.get('tx', ''), 'ton_amount': order['ton_amount']})
+            # refresh WATA status
+            cleanup_wata_cache()
+            is_paid = asyncio.run(check_wata_status(payment_id))
+            if is_paid and order['status'] == 'pending':
+                nano = to_nano(order['ton_amount'])
+                try:
+                    tx = asyncio.run(send_ton_real(order['user_address'], nano))
+                    order['status'] = 'completed'
+                    order['tx'] = tx
+                    return jsonify({'status': 'completed', 'tx': tx, 'ton_amount': order['ton_amount']})
+                except Exception as e:
+                    return jsonify({'status': 'error', 'message': f'Transfer failed: {str(e)}'})
+            return jsonify({'status': 'pending'})
+        except Exception as e:
+            return jsonify({'status': 'error', 'message': str(e)})
 
 if __name__ == "__main__":
     print(f"🚀 StarfallShop Exchange Server запущен на http://0.0.0.0:{PORT}")
