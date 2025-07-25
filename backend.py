@@ -253,7 +253,7 @@ async def send_ton_real(to_address, amount_nano):
     print(f"💸 Sending {from_nano(amount_nano):.4f} TON to {to_address}")
     
     try:
-        from pytoniq import LiteBalancer, WalletV4R2
+        from pytoniq import LiteBalancer, WalletV5R1
         
         # Get service wallet mnemonic from environment
         mnemonic_str = os.getenv("SERVICE_WALLET_MNEMONIC", "")
@@ -264,17 +264,17 @@ async def send_ton_real(to_address, amount_nano):
         if len(mnemonic) != 24:
             raise Exception(f"Invalid mnemonic: expected 24 words, got {len(mnemonic)}")
         
-        print(f"🔑 Loading service wallet from mnemonic...")
+        print(f"🔑 Loading service wallet from mnemonic (W5)...")
         
         # Connect to TON network
         provider = LiteBalancer.from_mainnet_config(1)
         await provider.start_up()
         print(f"🌐 Connected to TON mainnet")
         
-        # Load service wallet
-        wallet = await WalletV4R2.from_mnemonic(provider, mnemonic)
+        # Load service wallet as W5
+        wallet = await WalletV5R1.from_mnemonic(provider, mnemonic)
         wallet_address = wallet.address.to_str()
-        print(f"👛 Service wallet loaded: {wallet_address}")
+        print(f"👛 Service wallet loaded (W5): {wallet_address}")
         
         # Check wallet balance
         balance = await wallet.get_balance()
