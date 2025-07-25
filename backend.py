@@ -112,14 +112,9 @@ async def _provider_from_static():
 
 async def get_ton_provider(max_attempts: int = 5):
     """Return a connected provider or raise."""
-    attempts = []
-    # 1. Fresh global config
-    attempts.append(_provider_from_global)
-    # 2. Built-in configs 0-2
+    attempts = [_provider_from_global]
     for i in range(3):
         attempts.append(lambda idx=i: _provider_from_builtin(idx))
-    # 3. Static fallback
-    attempts.append(_provider_from_static)
 
     random.shuffle(attempts)  # randomize order a bit
 
@@ -160,23 +155,20 @@ async def send_ton_real(to_address: str, amount_nano: int):
         try:
             provider = await get_ton_provider()
             wallet = await WalletClass.from_mnemonic(provider, mnemonic)
-            try:
-                balance = await wallet.get_balance()
-            except Exception as bal_err:
-                if "-256" in str(bal_err):
-                    print("🆕 Wallet seems undeployed — deploying...")
-                    try:
-                        await wallet.deploy()
-                        await asyncio.sleep(5)
-                        balance = await wallet.get_balance()
-                        print("✅ Wallet deployed")
-                    except Exception as dep_err:
-                        raise Exception(f"Wallet deploy failed: {dep_err}")
-                else:
-                    raise
+            # after provider and wallet creation
+            await ensure_wallet_deployed(wallet)
+            balance = await wallet.get_balance()
             if balance < amount_nano + 50000000:
                 raise Exception("Insufficient balance for transfer + fees")
-            result = await wallet.transfer(destination=to_address, amount=amount_nano)
+            try:
+                result = await wallet.transfer(destination=to_address, amount=amount_nano)
+            except Exception as tx_err:
+                if "seqno" in str(tx_err) or "-256" in str(tx_err):
+                    print("⚠️ Seqno error during transfer; redeploy+retry once")
+                    await ensure_wallet_deployed(wallet)
+                    result = await wallet.transfer(destination=to_address, amount=amount_nano)
+                else:
+                    raise
             tx_hash = result.hash.hex() if hasattr(result, "hash") else str(result)
             print(f"✅ TON transfer completed! TX: {tx_hash}")
             await provider.close_all()
