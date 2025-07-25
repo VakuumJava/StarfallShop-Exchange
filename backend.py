@@ -253,7 +253,18 @@ async def send_ton_real(to_address, amount_nano):
     print(f"💸 Sending {from_nano(amount_nano):.4f} TON to {to_address}")
     
     try:
-        from pytoniq import LiteBalancer, WalletV5R1
+        # Try to import pytoniq
+        try:
+            from pytoniq import LiteBalancer, WalletV5R1
+            print(f"✅ pytoniq imported successfully")
+        except ImportError as e:
+            print(f"❌ pytoniq import failed: {e}")
+            # Try alternative import
+            try:
+                from pytoniq import LiteBalancer, WalletV4R2 as WalletV5R1
+                print(f"✅ Using WalletV4R2 as fallback")
+            except ImportError:
+                raise Exception("pytoniq library not available. Please check Railway deployment logs.")
         
         # Get service wallet mnemonic from environment
         mnemonic_str = os.getenv("SERVICE_WALLET_MNEMONIC", "")
@@ -264,17 +275,17 @@ async def send_ton_real(to_address, amount_nano):
         if len(mnemonic) != 24:
             raise Exception(f"Invalid mnemonic: expected 24 words, got {len(mnemonic)}")
         
-        print(f"🔑 Loading service wallet from mnemonic (W5)...")
+        print(f"🔑 Loading service wallet from mnemonic...")
         
         # Connect to TON network
         provider = LiteBalancer.from_mainnet_config(1)
         await provider.start_up()
         print(f"🌐 Connected to TON mainnet")
         
-        # Load service wallet as W5
+        # Load service wallet
         wallet = await WalletV5R1.from_mnemonic(provider, mnemonic)
         wallet_address = wallet.address.to_str()
-        print(f"👛 Service wallet loaded (W5): {wallet_address}")
+        print(f"👛 Service wallet loaded: {wallet_address}")
         
         # Check wallet balance
         balance = await wallet.get_balance()
@@ -301,8 +312,6 @@ async def send_ton_real(to_address, amount_nano):
         
         return f"✅ Sent {from_nano(amount_nano):.4f} TON to {to_address} | TX: {tx_hash}"
         
-    except ImportError:
-        raise Exception("pytoniq library not installed. Run: pip install pytoniq")
     except Exception as e:
         print(f"❌ Real TON transfer error: {e}")
         raise Exception(f"TON transfer failed: {str(e)}")
