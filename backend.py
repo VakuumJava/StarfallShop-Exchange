@@ -74,6 +74,9 @@ STATIC_LITESERVERS = [
     },
 ]
 
+# fix STATIC_LITESERVERS config issue by adding minimal validators field
+STATIC_CONFIG = {"liteservers": STATIC_LITESERVERS, "validators": []}
+
 async def _provider_from_global():
     """Try to build provider from fresh global config"""
     try:
@@ -101,8 +104,7 @@ async def _provider_from_builtin(idx: int):
 async def _provider_from_static():
     try:
         from pytoniq import LiteBalancer
-        cfg = {"liteservers": STATIC_LITESERVERS}
-        provider = LiteBalancer.from_config(cfg)
+        provider = LiteBalancer.from_config(STATIC_CONFIG)
         await asyncio.wait_for(provider.start_up(), timeout=10)
         return provider
     except Exception as e:
@@ -158,7 +160,20 @@ async def send_ton_real(to_address: str, amount_nano: int):
         try:
             provider = await get_ton_provider()
             wallet = await WalletClass.from_mnemonic(provider, mnemonic)
-            balance = await wallet.get_balance()
+            try:
+                balance = await wallet.get_balance()
+            except Exception as bal_err:
+                if "-256" in str(bal_err):
+                    print("🆕 Wallet seems undeployed — deploying...")
+                    try:
+                        await wallet.deploy()
+                        await asyncio.sleep(5)
+                        balance = await wallet.get_balance()
+                        print("✅ Wallet deployed")
+                    except Exception as dep_err:
+                        raise Exception(f"Wallet deploy failed: {dep_err}")
+                else:
+                    raise
             if balance < amount_nano + 50000000:
                 raise Exception("Insufficient balance for transfer + fees")
             result = await wallet.transfer(destination=to_address, amount=amount_nano)
